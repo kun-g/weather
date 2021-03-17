@@ -5,6 +5,7 @@ from bs4 import BeautifulSoup
 from rich.console import Console
 from rich.table import Table
 from rich.layout import Layout
+from rich.progress import track
 
 header = {
     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.82 Safari/537.36',
@@ -216,28 +217,25 @@ def query(city):
 @click.argument('parent', default='中国')
 def scrape(parent):
     console = Console()
+    for city in track(list(search_city(parent=parent)), description='抓取中') :
+        if not os.path.exists('./csv'):
+            os.mkdir('./csv')
+        ts = datetime.now().strftime('%Y-%m-%dT%H%M%S')
+        days7, hours24 = get_weather(city['AREAID'])
+        name = city['NAMECN']
+        with open(f'./csv/{name}_{ts}_day7.csv', 'w', newline='') as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow(['time', 'weather', 'temperature', 'direction', 'strength_from', 'strength_to'])
+            for e in days7:
+                writer.writerow(e)
 
-    with console.status("[bold green]正在加载城市列表...") as status:
-        for city in search_city(parent=parent):
-            status.update(f"正在抓取 {city['NAMECN']}")
-            city_id = city['AREAID']
-            if not os.path.exists('./csv'):
-                os.mkdir('./csv')
-            ts = datetime.now().strftime('%Y-%m-%dT%H%M%S')
-            days7, hours24 = get_weather(city_id)
-            with open(f'./csv/{city_id}_{ts}_day7.csv', 'w', newline='') as csvfile:
-                writer = csv.writer(csvfile)
-                writer.writerow(['time', 'weather', 'temperature', 'direction', 'strength_from', 'strength_to'])
-                for e in days7:
-                    writer.writerow(e)
+        with open(f'./csv/{name}_{ts}_hours24.csv', 'w', newline='') as csvfile:
+            fieldnames = ['time', 'temperature', 'direction', 'strength', 'direction_angel', 'rain', 'humidity']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
 
-            with open(f'./csv/{city_id}_{ts}_hours24.csv', 'w', newline='') as csvfile:
-                fieldnames = ['time', 'temperature', 'direction', 'strength', 'direction_angel', 'rain', 'humidity']
-                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-
-                writer.writeheader()
-                for e in hours24:
-                    writer.writerow(e)
+            writer.writeheader()
+            for e in hours24:
+                writer.writerow(e)
 
 if __name__ == '__main__':
     cli()
