@@ -82,54 +82,61 @@ def get_city_list():
     city_data = json.loads(res.text[len('var city_data ='):])
     with open('city.json', 'w') as f: json.dump(city_data, f)
 
-def iterate_city(city, parent=[]):
-    for k in city:
-        if 'AREAID' not in city[k]:
-            nParent = parent+[k] if k not in parent else parent
-            for c in iterate_city(city[k], nParent):
-                yield c
-        else:
-            if parent[-1] == k:
-                nParent = parent[:-1]
-            else:
-                nParent = parent
-
-            city[k]['PARENT'] = nParent[-1] if len(nParent) else None
-            yield city[k]
-
 def get_weather(city_id):
     res = get(f'http://www.weather.com.cn/weather1d/{city_id}.shtml')
     bs = BeautifulSoup(res.text, 'html.parser')
 
-    ts = datetime.now().strftime('%Y-%m-%dT%H%M%S')
     days7 = get_hour3(bs)
-    #with open(f'{city_id}_{ts}_day7.csv', 'w', newline='') as csvfile:
-    #    writer = csv.writer(csvfile)
-    #    writer.writerow(['time', 'weather', 'temperature', 'direction', 'strength_from', 'strength_to'])
-    #    for e in days7:
-    #        writer.writerow(e)
+    hours24 = get_observer24(bs)
 
-    #hours24 = get_observer24(bs)
-    #with open(f'{city_id}_{ts}_hours24.csv', 'w', newline='') as csvfile:
-    #    fieldnames = ['time', 'temperature', 'direction', 'strength', 'direction_angel', 'rain', 'humidity']
-    #    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-
-    #    writer.writeheader()
-    #    for e in hours24:
-    #        writer.writerow(e)
     return days7, hours24
 
-def search_city(city_name = None):
+def search_for_city(city, name):
+    for k in city:
+        if name == k and 'AREAID' in city[k]:
+            return city[k]
+        res = search_for_city(city[k], name)
+        if res:
+            return res
+
+def iterator(tree):
+    for k in tree:
+        if 'AREAID' in tree[k]:
+            yield tree[k]
+        else:
+            for e in iterator(tree[k]):
+                yield e
+
+def search_for_children(city, name):
+    if name == '中国':
+        res = city
+    elif name in city:
+        res = city[name]
+    else:
+        res = {}
+
+    pending = [city[k] for k in city]
+    while len(pending):
+        c = pending.pop()
+        if name in c:
+            res = c[name]
+            break
+        if 'AREAID' not in c:
+            pending += [c[k] for k in c]
+
+    return iterator(res)
+
+def search_city(city_name = None, parent = None):
     if not os.path.exists('./city.json'):
         get_city_list()
 
     with open('./city.json') as f:
         city = json.load(f)
-    name_area = {}
-    for c in iterate_city(city, ['中国']):
-        name_area[c['NAMECN']] = c
-    if city_name == None:
-        return name_area
+
+    if city_name:
+        return search_for_city(city, city_name)
+    else:
+        return search_for_children(city, parent)
 
     return name_area[city_name] if city_name in name_area else None
 
@@ -159,7 +166,7 @@ def cli():
 @cli.command()
 @click.argument('city')
 def query(city):
-    config = search_city(city)
+    config = search_city(city_name=city)
     if config == None:
         return print("找不到城市 " + city)
     days7, hours24 = get_weather(config['AREAID'])
@@ -180,7 +187,6 @@ def query(city):
         wind = f'{d["min_wind"]}~{d["max_wind"]}'
 
         table7.add_row(d['date'], weather, temperature, wind)
-
 
     table24 = Table(title=f"{city}近24小时天气")
 
@@ -205,12 +211,33 @@ def query(city):
     )
     layout.height = 30
     console.print(layout)
-    
 
 @cli.command()
-@click.argument('city', default='')
-def scrape(city):
-    click.echo('scraping'+ city)
+@click.argument('parent', default='中国')
+def scrape(parent):
+    console = Console()
+
+    with console.status("[bold green]正在加载城市列表...") as status:
+        for city in search_city(parent=parent):
+            status.update(f"正在抓取 {city['NAMECN']}")
+            city_id = city['AREAID']
+            if not os.path.exists('./csv'):
+                os.mkdir('./csv')
+            ts = datetime.now().strftime('%Y-%m-%dT%H%M%S')
+            days7, hours24 = get_weather(city_id)
+            with open(f'./csv/{city_id}_{ts}_day7.csv', 'w', newline='') as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow(['time', 'weather', 'temperature', 'direction', 'strength_from', 'strength_to'])
+                for e in days7:
+                    writer.writerow(e)
+
+            with open(f'./csv/{city_id}_{ts}_hours24.csv', 'w', newline='') as csvfile:
+                fieldnames = ['time', 'temperature', 'direction', 'strength', 'direction_angel', 'rain', 'humidity']
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+
+                writer.writeheader()
+                for e in hours24:
+                    writer.writerow(e)
 
 if __name__ == '__main__':
     cli()
